@@ -317,6 +317,7 @@ class OctopusAPI:
         self.api_redeem_cash = '/Redeem/RedeemCash'
         self.api_get_surveys = '/SurveyHistory/GetHistories'
         self.api_get_incentives = '/Incentive/GetIncentives'
+        self.api_get_referals = '/Incentive/GetReferralIncentives'
 
         # The page the real site makes each call from
         self.referers = {
@@ -328,6 +329,7 @@ class OctopusAPI:
             self.api_redeem_cash: f'{self.site}/redeem',
             self.api_get_surveys: f'{self.site}/history',
             self.api_get_incentives: f'{self.site}/incentives',
+            self.api_get_referals: f'{self.site}/profile#referral'
         }
 
     def _get(self, endpoint: str):
@@ -355,6 +357,9 @@ class OctopusAPI:
     def get_incentive_history(self):
         return self._post(self.api_get_incentives, {"PageNumber": 0, "PageSize": 1000})
 
+    def get_referals(self):
+        return self._post(self.api_get_referals, {"PageNumber": 0, "PageSize": 1000})
+    
     def get_redemptions(self):
         return self._post(self.api_get_redemptions, {"PageNumber": 0, "PageSize": 1000})
 
@@ -437,6 +442,18 @@ class Octopus:
         filtered_counts['Active'] = active
 
         return dict(filtered_counts)
+    
+    def referal_stats(self, referals: list = None):
+        if referals is None:
+            referals = self.octopusapi.get_referals()
+
+        total_referals = len(referals)
+        total_earnings = sum([r['amount'] for r in referals])
+
+        return {
+            'number': total_referals,
+            'total_earnings': total_earnings
+        }
 
     
     @staticmethod
@@ -530,6 +547,7 @@ if __name__ == '__main__':
     total_earned = o.get_total_earned(balance=balance, total_redeemed=total_redeemed) # balance and total_redeemed parameters are optional but used here given balance and total_redeemed are already known to save 2 redundant API calls
     redeemable_balance = o.get_redeemable_balance(balance=balance) # balance parameter is again optional but used here to save a redundant API call
     survey_stats = o.survey_stats(active=open_surveys['number']) # active parameter optional as well
+    referral_stats = o.referal_stats()
 
     print('===== Open Surveys =====')
     print(f"You have {open_surveys['number']} open survey{'' if open_surveys['number'] == 1 else 's'}.")
@@ -555,3 +573,6 @@ if __name__ == '__main__':
         print(f"Quota Exceeded: {survey_stats['QuotaFail']} ({survey_stats['QuotaFail'] / total_counted_surveys * 100:.2f}%)")
     if 'Active' in survey_stats:
         print(f"Active: {survey_stats['Active']} ({survey_stats['Active'] / total_counted_surveys * 100:.2f}%)")
+        
+    print('\n===== Referral Stats =====')
+    print(f'Total Referral Earnings: ${referral_stats["total_earnings"]:.2f} from {referral_stats['number']} referral{'' if referral_stats['number'] == 1 else 's'} surveys.')
