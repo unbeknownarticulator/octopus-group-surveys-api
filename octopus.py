@@ -3,7 +3,7 @@ import base64
 import json
 import random
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from bs4 import BeautifulSoup
 
@@ -446,13 +446,16 @@ class Octopus:
     def referal_stats(self, referals: list = None):
         if referals is None:
             referals = self.octopusapi.get_referals()
+        
 
         total_referals = len(referals)
         total_earnings = sum([r['amount'] for r in referals])
+        people_referred = Counter(item["description"].split("Member:")[-1].strip() for item in referals)
 
         return {
             'number': total_referals,
-            'total_earnings': total_earnings
+            'total_earnings': total_earnings,
+            'people_referred': people_referred
         }
 
     
@@ -575,4 +578,8 @@ if __name__ == '__main__':
         print(f"Active: {survey_stats['Active']} ({survey_stats['Active'] / total_counted_surveys * 100:.2f}%)")
         
     print('\n===== Referral Stats =====')
+    print(f'People Referred:')
+    for person, count in referral_stats['people_referred'].items():
+        print(f' - {person}: {count} survey{"" if count == 1 else "s"} {"" if count < 24 else " (Max referal bonus reached)"}')
     print(f'Total Referral Earnings: ${referral_stats["total_earnings"]:.2f} from {referral_stats['number']} referral{'' if referral_stats['number'] == 1 else 's'} surveys.')
+    
