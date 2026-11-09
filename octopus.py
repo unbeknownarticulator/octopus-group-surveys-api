@@ -282,7 +282,12 @@ class OctopusAuth:
 
             else:
                 print(f"Failed with status code: {response.status_code}")
-                if response.status_code != 404:
+                if response.status_code == 403:
+                    print(
+                        f"Access denied for {api_endpoint}. The service may require "
+                        "browser verification or may be blocking this request."
+                    )
+                elif response.status_code != 404:
                     print(response.text)
                 return None
 
@@ -406,6 +411,9 @@ class Octopus:
 
     def get_open_surveys(self):
         open_surveys = self.octopusapi.get_open_surveys()
+
+        if open_surveys is None:
+            raise RuntimeError("Unable to retrieve open surveys; see the API error above.")
 
         survey_count = len(open_surveys)
         total_earnings = sum([s['incentive'] for s in open_surveys])
@@ -544,7 +552,11 @@ if __name__ == '__main__':
 
     o = Octopus('login.json')
 
-    open_surveys = o.get_open_surveys()
+    try:
+        open_surveys = o.get_open_surveys()
+    except RuntimeError as error:
+        raise SystemExit(str(error))
+
     balance = o.get_balance()
     total_redeemed = o.get_total_redeemed()
     total_earned = o.get_total_earned(balance=balance, total_redeemed=total_redeemed) # balance and total_redeemed parameters are optional but used here given balance and total_redeemed are already known to save 2 redundant API calls
