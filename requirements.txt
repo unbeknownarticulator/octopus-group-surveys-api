@@ -1,2 +1,3 @@
-bs4
+beautifulsoup4
+curl-cffi
 requests

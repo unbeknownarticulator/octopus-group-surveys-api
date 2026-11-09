@@ -9,15 +9,8 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-
-# curl_cffi can impersonate Chrome's TLS/HTTP2 fingerprint. Cloudflare's clearance cookie
-# is often tied to that fingerprint, so plain `requests` gets rejected even after solving.
-try:
-    from curl_cffi import requests as cffi_requests
-    from curl_cffi.requests import BrowserType
-except ImportError:
-    cffi_requests = None
-    BrowserType = None
+from curl_cffi import requests as cffi_requests
+from curl_cffi.requests import BrowserType
 
 class OctopusAuth:
     def __init__(self, json_file: str):
