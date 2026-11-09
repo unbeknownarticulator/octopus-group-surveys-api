@@ -590,8 +590,9 @@ if __name__ == '__main__':
         print(f"Active: {survey_stats['Active']} ({survey_stats['Active'] / total_counted_surveys * 100:.2f}%)")
         
     print('\n===== Referral Stats =====')
-    print(f'People Referred:')
-    for person, count in referral_stats['people_referred'].items():
-        print(f' - {person}: {count} survey{"" if count == 1 else "s"} {"" if count < 24 else " (Max referal bonus reached)"}')
     print(f'Total Referral Earnings: ${referral_stats["total_earnings"]:.2f} from {referral_stats['number']} referral{'' if referral_stats['number'] == 1 else 's'} surveys.')
+    if referral_stats['number'] > 0:
+        print(f'People Referred:')
+        for person, count in referral_stats['people_referred'].items():
+            print(f' - {person}: {count} survey{"" if count == 1 else "s"} (${count + 1:.2f}) {"" if count < 24 else " (Max referal bonus reached)"}')
     

@@ -29,17 +29,23 @@ Possible Earnings: $8.40
 Total Time: 30 minutes
 
 ===== Balance =====
-Current Balance: $28.12
-Redeemable Balance: $20.00
-Total Redeemed: $120.00
-Time Required: $148.12
+Current Balance: $29.39
+Redeemable Balance: $25.00
+Total Redeemed: $400.00
+Total Earned: $429.39
 
 ===== Survey Stats =====
-Complete: 61 (67.78%)
-Screened Out: 18 (20.00%)
-QA Flagged: 3 (3.33%)
-Quota Exceeded: 6 (6.67%)
-Active: 2 (2.22%)
+Completed: 88 (52.07%)
+Screened Out: 63 (37.28%)
+QA Flagged: 7 (4.14%)
+Quota Exceeded: 11 (6.51%)
+Active: 0 (0.00%)
+
+===== Referral Stats =====
+Total Referral Earnings: $47.00 from 2 referrals surveys.
+People Referred:
+ - John Smith: 21 surveys ($22.00) 
+ - Leo Faber: 24 surveys ($25.00)  (Max referal bonus reached)
 ```
 
 you can use the code for any project of course this just demonstrates that it actually works
