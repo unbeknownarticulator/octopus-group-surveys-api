@@ -1,28 +1,53 @@
 import requests
 import base64
 import json
+import os
 import random
+import re
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
+# curl_cffi can impersonate Chrome's TLS/HTTP2 fingerprint. Cloudflare's clearance cookie
+# is often tied to that fingerprint, so plain `requests` gets rejected even after solving.
+try:
+    from curl_cffi import requests as cffi_requests
+    from curl_cffi.requests import BrowserType
+except ImportError:
+    cffi_requests = None
+    BrowserType = None
 
 class OctopusAuth:
     def __init__(self, json_file: str):
         self.json_file = json_file
 
         # One shared session: browser-like headers + connection reuse
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": (
+        self.impersonate = 'chrome'
+        if cffi_requests is not None:
+            self.session = cffi_requests.Session(impersonate=self.impersonate)
+            # The impersonation profile supplies the user agent and sec-ch-ua headers.
+            # Drop the two headers that only real page navigations send.
+            self.session.headers.update({"Upgrade-Insecure-Requests": None, "Sec-Fetch-User": None})
+        else:
+            print("Note: curl_cffi isn't installed, so requests use Python's TLS fingerprint, which "
+                  "Cloudflare may reject even after solving the challenge. Fix: pip install curl_cffi")
+            self.session = requests.Session()
+            self.session.headers["User-Agent"] = (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
-            ),
+            )
+
+        # Headers Chrome sends on the site's own XHR/fetch calls
+        self.session.headers.update({
             "Origin": "https://my.octopusgroup.com.au",
             "Referer": "https://my.octopusgroup.com.au/",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-AU,en;q=0.9",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
         })
 
         with open(self.json_file, 'r') as f:
@@ -32,6 +57,11 @@ class OctopusAuth:
         phone_val = self.credentials['phone']
         self.phone = phone_val if phone_val[0] == '4' else phone_val[1:]
         self.password = self.credentials['password']
+
+        # Cloudflare / FlareSolverr: reuse a previously solved session if we have one
+        self.flaresolverr_url = self.credentials.get('flaresolverr_url') or 'http://localhost:8191/v1'
+        self.cf_file = os.path.join(os.path.dirname(os.path.abspath(self.json_file)), 'cf_session.json')
+        self._load_cf_session()
 
         # Handle optional credentials safely
         optional_keys = ['authorization', 'firebase_api_key', 'refresh_token']
@@ -64,14 +94,130 @@ class OctopusAuth:
         with open(self.json_file, 'w', encoding='utf-8') as f:
             json.dump(self.credentials, f, indent=4)
 
+    # ------------------------------------------------------- Cloudflare handling
+
+    def _apply_cf_session(self, user_agent: str, cookies: list):
+        """Cloudflare's clearance cookie is tied to the user agent that solved
+        the challenge, so we must adopt FlareSolverr's UA along with its cookies."""
+        if user_agent:
+            self.session.headers['User-Agent'] = user_agent
+            if cffi_requests is not None:
+                self.impersonate = self._pick_impersonation(user_agent)
+                self.session.headers['sec-ch-ua-platform'] = self._platform_from_ua(user_agent)
+        for c in cookies:
+            self.session.cookies.set(c['name'], c['value'], domain=c.get('domain') or '', path=c.get('path', '/'))
+
+    @staticmethod
+    def _pick_impersonation(user_agent: str) -> str:
+        """Use the TLS profile matching the user agent's Chrome version if curl_cffi has it."""
+        m = re.search(r'Chrome/(\d+)', user_agent)
+        if m and f'chrome{m.group(1)}' in {b.value for b in BrowserType}:
+            return f'chrome{m.group(1)}'
+        return 'chrome'
+
+    @staticmethod
+    def _platform_from_ua(user_agent: str) -> str:
+        if 'Macintosh' in user_agent or 'Mac OS X' in user_agent:
+            return '"macOS"'
+        if 'Linux' in user_agent or 'X11' in user_agent:
+            return '"Linux"'
+        return '"Windows"'
+
+    def _load_cf_session(self):
+        try:
+            with open(self.cf_file, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            self._apply_cf_session(saved['userAgent'], saved['cookies'])
+        except Exception:
+            pass  # no saved session (or unreadable): we'll solve one if needed
+
+    def _save_cf_session(self, user_agent: str, cookies: list):
+        """Merge new cookies into the saved session instead of overwriting it.
+        FlareSolverr returns no cookies for static files like main.js, and that must
+        not wipe the clearance cookie saved from the page request."""
+        if not cookies:
+            return
+
+        def key(c):
+            return (c['name'], c.get('domain'), c.get('path'))
+
+        merged = {}
+        try:
+            with open(self.cf_file, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            # cookies are bound to the user agent that solved the challenge, so keep
+            # the old ones only if it hasn't changed
+            if saved.get('userAgent') == user_agent:
+                merged = {key(c): c for c in saved['cookies']}
+        except Exception:
+            pass
+
+        merged.update({key(c): c for c in cookies})
+
+        with open(self.cf_file, 'w', encoding='utf-8') as f:
+            json.dump({'userAgent': user_agent, 'cookies': list(merged.values())}, f, indent=4)
+
+    @staticmethod
+    def _is_cloudflare_challenge(response, url: str) -> bool:
+        """True if this is a Cloudflare challenge page for our own site."""
+        if response.status_code not in (403, 503):
+            return False
+        host = urlparse(url).hostname or ''
+        if not host.endswith('octopusgroup.com.au'):
+            return False
+        if response.headers.get('cf-mitigated', '').lower() == 'challenge':
+            return True
+        body = response.text[:3000]
+        return 'Just a moment' in body or 'challenge-platform' in body
+
+    def _solve_cloudflare(self) -> bool:
+        """Ask FlareSolverr to pass the challenge, then reuse its cookies + user agent
+        in our normal session (FlareSolverr can't forward JSON POSTs or custom headers,
+        so it's used only to obtain clearance, not to make the API calls)."""
+        print("Cloudflare challenge detected. Solving via FlareSolverr...")
+
+        try:
+            # Plain requests.post, not self.session: FlareSolverr shouldn't get our cookies/headers
+            r = requests.post(
+                self.flaresolverr_url,
+                json={"cmd": "request.get", "url": "https://my.octopusgroup.com.au/", "maxTimeout": 60000},
+                timeout=90
+            )
+            data = r.json()
+        except Exception as e:
+            print(f"Could not reach FlareSolverr at {self.flaresolverr_url}: {e}")
+            return False
+
+        if data.get('status') != 'ok':
+            print(f"FlareSolverr failed to solve the challenge: {data.get('message')}")
+            return False
+
+        solution = data['solution']
+        self._apply_cf_session(solution['userAgent'], solution['cookies'])
+        self._save_cf_session(solution['userAgent'], solution['cookies'])
+        print("Cloudflare challenge solved.")
+        return True
+
     def _send(self, method: str, url: str, **kwargs):
         """Single place all HTTP goes through: timeout, small random delay,
-        and exponential backoff on 429/5xx (honouring Retry-After)."""
+        Cloudflare challenge solving (once per request), and exponential
+        backoff on 429/5xx (honouring Retry-After)."""
         kwargs.setdefault('timeout', 15)
 
-        for attempt in range(2 + 1):
+        attempt = 0
+        solved = False
+
+        while True:
             time.sleep(random.uniform(0.4, 1.2))
-            response = self.session.request(method, url, **kwargs)
+            extra = {'impersonate': self.impersonate} if cffi_requests is not None else {}
+            response = self.session.request(method, url, **kwargs, **extra)
+
+            # Challenge page: solve once, then retry the same request
+            if not solved and self._is_cloudflare_challenge(response, url):
+                solved = True
+                if self._solve_cloudflare():
+                    continue
+                return response
 
             if (response.status_code == 429 or response.status_code >= 500) and attempt < 2:
                 try:
@@ -80,6 +226,7 @@ class OctopusAuth:
                     wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 print(f"Got {response.status_code}, backing off {wait:.1f}s...")
                 time.sleep(wait)
+                attempt += 1
                 continue
 
             return response
@@ -109,27 +256,50 @@ class OctopusAuth:
 
         return response.json().get("id_token")
 
-    def regenerate_firebase_api_key(self):
-        # get the login page html and parse for main js file name
-        r = self._send(
-            'GET',
-            'https://my.octopusgroup.com.au/login',
-            headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
-        )
-        soup = BeautifulSoup(r.text, 'html.parser')
-        scripts = soup.find_all("script")
-        for script in scripts:
-            if script.get('src'):
-                if script['src'].startswith('main.'):
-                    main_js = script['src']
-                    break
+    def _fetch_via_flaresolverr(self, url: str) -> str:
+        """Fetch a page through FlareSolverr and return its body. Used for the
+        Firebase key lookup, where we need clean page content, not API JSON."""
+        try:
+            r = requests.post(
+                self.flaresolverr_url,
+                json={"cmd": "request.get", "url": url, "maxTimeout": 60000},
+                timeout=90
+            )
+            data = r.json()
+        except Exception as e:
+            raise RuntimeError(f"Could not reach FlareSolverr at {self.flaresolverr_url}: {e}")
 
-        main_js_url = 'https://my.octopusgroup.com.au/' + main_js
+        if data.get('status') != 'ok':
+            raise RuntimeError(f"FlareSolverr failed for {url}: {data.get('message')}")
+
+        solution = data['solution']
+        # keep our normal session in sync with the freshest clearance
+        self._apply_cf_session(solution['userAgent'], solution['cookies'])
+        self._save_cf_session(solution['userAgent'], solution['cookies'])
+        return solution['response']
+
+    def regenerate_firebase_api_key(self):
+        # get the main page html (via FlareSolverr) and parse for the main js file name
+        html = self._fetch_via_flaresolverr('https://my.octopusgroup.com.au/')
+        soup = BeautifulSoup(html, 'html.parser')
+
+        main_js = None
+        for script in soup.find_all("script"):
+            src = script.get('src')
+            if src and src.lstrip('/').startswith('main.'):
+                main_js = src.lstrip('/')
+                break
+
+        if not main_js:
+            raise RuntimeError("Could not find the main.js script tag on the site's main page.")
 
         # get the firebase api key from the main js file
-        r = self._send('GET', main_js_url, headers={"Accept": "*/*"})
-        js_text = r.text
-        api_key = js_text.split('apiKey:"')[1].split('"')[0].strip()
+        js_text = self._fetch_via_flaresolverr('https://my.octopusgroup.com.au/' + main_js)
+
+        try:
+            api_key = js_text.split('apiKey:"')[1].split('"')[0].strip()
+        except IndexError:
+            raise RuntimeError(f"Could not find the Firebase apiKey in {main_js}.")
 
         return api_key
 
@@ -157,6 +327,7 @@ class OctopusAuth:
                 'phoneNumber': '+61' + self.phone,
                 'password': self.password
             },
+            headers={'Referer': 'https://my.octopusgroup.com.au/' + 'login'},
             require_auth=False
         )
 
@@ -284,9 +455,11 @@ class OctopusAuth:
                 print(f"Failed with status code: {response.status_code}")
                 if response.status_code == 403:
                     print(
-                        f"Access denied for {api_endpoint}. The service may require "
-                        "browser verification or may be blocking this request."
+                        f"Access denied for {api_endpoint}. "
+                        f"cf-mitigated={response.headers.get('cf-mitigated')!r}, "
+                        f"server={response.headers.get('server')!r}"
                     )
+                    print(f"Response starts with: {response.text[:200]!r}")
                 elif response.status_code != 404:
                     print(response.text)
                 return None
@@ -595,4 +768,3 @@ if __name__ == '__main__':
         print(f'People Referred:')
         for person, count in referral_stats['people_referred'].items():
             print(f' - {person}: {count} survey{"" if count == 1 else "s"} (${count + 1:.2f}) {"" if count < 24 else " (Max referal bonus reached)"}')
-    
