@@ -26,7 +26,7 @@ optional: if you are wanting to use the money redeeming part of the script, incl
 
 ### solving cloudflare challenge
 
-octopus group's firebase api key is required to regenerate authorization tokens. this firebase api key is generally static, but could possibly be changed in the future. finding the program uses [Flaresolverr](https://github.com/Flaresolverr/Flaresolverr), which needs to be hosted on the same device running this program. for full automatic integration, Flaresolverr must be installed, but alternatively, the firebase api key can be manually added to `login.json` and manually updated if/when it eventually changes (infrequently).
+octopus group's firebase api key is required to regenerate authorization tokens. this firebase api key is generally static, but could possibly be changed in the future. the program uses [Flaresolverr](https://github.com/Flaresolverr/Flaresolverr), to find it, which needs to be hosted on the same device running this program. for full automatic integration, Flaresolverr must be installed, but alternatively, the firebase api key can be manually added to `login.json` and manually updated if/when it eventually changes (infrequently).
 
 the current firebase api key is:
 ```json
