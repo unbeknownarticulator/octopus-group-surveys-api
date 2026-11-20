@@ -523,16 +523,16 @@ class OctopusAPI:
         return self._get(self.api_open_surveys)
 
     def get_all_surveys(self):
-        return self._post(self.api_get_surveys, {"PageNumber": 0, "PageSize": 1000})
+        return self._post(self.api_get_surveys, {"PageNumber": 0, "PageSize": 500})
 
     def get_incentive_history(self):
-        return self._post(self.api_get_incentives, {"PageNumber": 0, "PageSize": 1000})
+        return self._post(self.api_get_incentives, {"PageNumber": 0, "PageSize": 500})
 
     def get_referals(self):
-        return self._post(self.api_get_referals, {"PageNumber": 0, "PageSize": 1000})
+        return self._post(self.api_get_referals, {"PageNumber": 0, "PageSize": 500})
     
     def get_redemptions(self):
-        return self._post(self.api_get_redemptions, {"PageNumber": 0, "PageSize": 1000})
+        return self._post(self.api_get_redemptions, {"PageNumber": 0, "PageSize": 500})
 
     def setup_redeem_approval(self, amount: int):
         return self._post(self.api_redeem_setup_approval, {"Amount": amount})
