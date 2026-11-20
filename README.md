@@ -30,7 +30,7 @@ octopus group's firebase api key is required to regenerate authorization tokens.
 
 the current firebase api key is:
 ```json
-    "firebase_api_key": "AIzaSyCIs7GZ0nqqzSdeZWxqYAw7FyGgbfM5GvM"
+    "firebase_api_key": "AIzaSyBNOv6MB6b0_TGBZfAl5YGQfbFliuoxa-8"
 ```
 if Flaresolverr is used, the program defaults to using `http://localhost:8191/v1` but this can be overridden by adding a `flaresolverr_url` key in `login.json`.
 
